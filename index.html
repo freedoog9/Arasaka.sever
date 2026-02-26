@@ -1,0 +1,728 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Arasaka Server Access</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { background: #000; font-family: 'Courier New', monospace; color: #ff0000; overflow: hidden; height: 100vh; }
+        #terminal { padding: 20px; height: 100vh; overflow-y: auto; background: #000; position: relative; }
+        #terminal::before { content: ''; position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: linear-gradient(transparent 50%, rgba(255, 0, 0, 0.03) 50%); background-size: 100% 4px; pointer-events: none; z-index: 1; }
+        .output { white-space: pre-wrap; word-wrap: break-word; line-height: 1.2; margin-bottom: 2px; text-shadow: 0 0 5px #ff0000; }
+        .ascii-art { color: #ff0000; font-size: 10px; line-height: 10px; white-space: pre; margin-bottom: 0; overflow: hidden; }
+        .error { color: #ff0000; background-color: rgba(255, 0, 0, 0.2); font-weight: bold; }
+        .input-line { display: flex; align-items: center; margin-top: 5px; }
+        .prompt { color: #ff0000; margin-right: 10px; text-shadow: 0 0 5px #ff0000; }
+        input { background: transparent; border: none; color: #ff0000; font-family: 'Courier New', monospace; font-size: 14px; outline: none; flex: 1; text-shadow: 0 0 5px #ff0000; }
+        .hidden { display: none; }
+        #login-screen { display: flex; flex-direction: column; justify-content: center; align-items: center; height: 100vh; gap: 20px; }
+        #login-form { display: flex; flex-direction: column; gap: 15px; min-width: 400px; }
+        #console-screen { display: none; }
+    </style>
+</head>
+<body>
+    <div id="terminal">
+        <div id="login-screen">
+            <div id="login-form">
+                <div class="input-line" style="margin-top: 0;">
+                    <span class="prompt">Username:</span>
+                    <input type="text" id="username" autocomplete="off" autofocus>
+                </div>
+                <div class="input-line" style="margin-top: 10px;">
+                    <span class="prompt">Password:</span>
+                    <input type="password" id="password" autocomplete="off">
+                </div>
+            </div>
+        </div>
+        <div id="console-screen">
+            <div id="output"></div>
+            <div id="passphrase-form" class="hidden">
+                <div class="input-line">
+                    <span class="prompt" id="input-prompt">ENTER PASSPHRASE:</span>
+                    <input type="text" id="passphrase" autocomplete="off">
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const output = document.getElementById('output');
+        const passphraseInput = document.getElementById('passphrase');
+        const inputPrompt = document.getElementById('input-prompt');
+        
+        let gameState = 'LOGIN';
+        let isTyping = false;
+        let currentStage = 0;
+        
+        const credentials = {
+            username: 'C0r0nad0',
+            passwordPrefix: 'A4G@B3CBi$QKBgQC' 
+        };
+
+        const passphrases = [
+            'Plug in and take over',
+            'wake up SAMURAI the City burns when eyes are open',
+            'MalonevHernandez',
+            'Petrochem',
+            'Necessity over style. Style over substance. Substance over style. Style and substance.',
+            'It\'s time to rise up and take this city, Choombas.',
+            'NC570442'
+        ];
+
+        const asciiLogoLines = [
+            "                                              .--::////:--.",
+            "                                           `-/ydmNNNmmmmNNNmdy/-`",
+            "                                        .+dNNmyo/+shddhs+/oymNNd+.",
+            "                                      .sNMdo` .yNMMMMMMNy. `-omMNs.",
+            "                                     `+NMd/`    hMMMMMMMMMMh    `/dMN+`",
+            "                                    `yMNo`     `MMMMMMMMMMMM`     `oNMy`",
+            "                                    yMN`.::/+/ .`yMMMMMMMMMM`./+/:.`/NMy",
+            "                                   +MM+/dNMMMMMdosmMMMMMMmsodMMMMMNd/+MM+ ",
+            "                                  `NMdoMMMMMMMMMMy`:hMMh`yMMMMMMMMMModMN`",
+            "                                  :MMoNMMMMMMMMMMM. oMMo .MMMMMMMMMMMNoMM:",
+            "                                  /MM/dMMMMMMMMMM` oMMo `mMMMMMMMMMMd/MM/",
+            "                                  :MMo.hMMMMMMMMMh. oMMo .hMMMMMMMMMh.oMM:",
+            "                                  `NMd  -ohddhssNMNsyMMysNMNsshddho-  dMN`",
+            "                                   +MM+          .sNMMMMMMNs`         +MM+",
+            "                                    yMM/           .sNMMNs.           /MMh",
+            "                                     +NMm`         oMMo         `/mMN+",
+            "                                      .sNMmo-       oMMo       -omMNs.",
+            "                                        `+hMNmho/-.+dd+.-/ohNMMh+`",
+            "                                           `./sdmNNNNNNNNNNmds/.`",
+            "                                                ``.-:////:-.``",
+            "         `....      ............`       `....`         `....         `....      ...     `.....\\``....",
+            "       :sdmNNNNs-    mNNNNNNNNNNNm/   `/ymNNNNm+`      mM+NNNmy:     -sdmNNNNs- . NNN``:smNNd  dddmNNNNh:",
+            "     `yNMNhsohNMNs. NMMhssssssdMMd -dMMmyssdMMmo` ///yyMMmyyy. `yNMNhsoyNMNy /MMMymMMNh +yNMNhsoyNMNh-",
+            "     oMMd.     -mMMo NMM`      :hhs dMMs`    `/MMM- `:ymMMm        MMd.     -mMM hMMMMNh+.  /MMN-`    .hMMh",
+            "     yMMy      dMMo dMMNdo`        NMM+       MMM: ///./ymMMmy: `yMM        hMM hmMMMm+     +MMm`     oMMh",
+            "     -mMMh+:-\`dMMo dNMmNMNdo-`     +NMNy/--`MMM/ MM+    +yNMMMm smMM  :--`hMM hmMMmMMNh+ -dMMdo:--`oMMh",
+            "      .smNMMMNsdMMo ---.-odNMNdo`   :hmMMMMN/MMM: dMMMMMMMMMMMM s.smNMMMMyhMM s---`:smMMN dmNNMMMMdoMMh",
+            "       `-////::///-       `-/////.     .:////-///`` :///////////-  `-////:://-  ///    ////    ::////-//:/"
+        ];
+
+        // --- Data Construction (Crash Sequence) ---
+        // type: 'text' (一文字ずつ), 'line' (一行ずつ)
+        function getCrashSequence() {
+            return [
+                { content: "Thread 0 crashed with ARM Thread State (64-bit):" },
+                { content: "  x0: 0x00000001b76acea0   x1: 0x000000018fbd3fbd   x2: 0x000000010cb17260   x3: 0x0000000000000001" },
+                { content: "  x4: 0x0000000000000000   x5: 0x0000000000000001   x6: 0x0000000000000020   x7: 0x0000000000000004" },
+                { content: "  x8: 0x0000000109a34380   x9: 0x0000000109a34310  x10: 0x0000000109a34311  x11: 0x0000000109a34318" },
+                { content: " x12: 0x000000010c8e3cb0  x13: 0x0000000000000000  x14: 0x0000000000000000  x15: 0x000000018fbd49dd" },
+                { content: " x16: 0x00000001b76acea0  x17: 0x0000000000000000  x18: 0x0000000000000000  x19: 0x000000018fbd3fbd" },
+                { content: " x20: 0x0000000109a34318  x21: 0x0000000109a34388  x22: 0x00000001b766cfd0  x23: 0x0000000000000000" },
+                { content: " x24: 0x00000001b76acea0  x25: 0x0000000000000000  x26: 0x00000001b766e000  x27: 0x00000000ffed8282" },
+                { content: " x28: 0x0000000000000000   fp: " },
+                { content: "0x000000016f969e90   lr: 0x0000000184475aa8" },
+                { content: "  sp: 0x000000016f969e70   pc: 0x0000000184475da8 cpsr: 0x80000000" },
+                { content: "0x100490000 - 0x103cabfff Arasaka <6499420763bf3621abf3f6218adc6354> /var/containers/Bundle/Application/11F1F5DE-2F68-4331-A107-FAADCED42A1F/Ara.srv/Arasaka" },
+                { content: "0x104ce8000 - 0x104e1ffff MMCommon arm64  <85b8839214673db29e3b6a4eeaaacba7> /var/containers/Bundle/Application/11F1F5DE-2F68-4331-A107-FAADCED42A1F/Ara.srv/Frameworks/MMCommon.framework/MMCommon" },
+                { content: "0x104e68000 - 0x104ea3fff dyld arm64  <06dc98224ae03573bf72c78810c81a78> /usr/lib/dyld" },
+                { content: "0x104efc000 - 0x1051bbfff TXLiteAVSDK_Smart_No_VOD arm64  <94b2ab6b3c863923b321327155770286> /var/containers/Bundle/Application/11F1F5DE-2F68-4331-A107-FAADCED42A1F/Ara.srv/Frameworks/TXLiteAVSDK_Smart_No_VOD.framework/TXLiteAVSDK_Smart_No_VOD" },
+                { content: "0x1055e4000 - 0x10572ffff WCDB arm64  <c1b1509046923a93b29755fe25526e00> /var/containers/Bundle/Application/11F1F5DE-2F68-4331-A107-FAADCED42A1F/Ara.srv/Frameworks/ARA.framework/ARA" },
+                { content: "0x10587c000 - 0x105c7bfff MultiMedia arm64  <b456f7d1d8ba3eadb83d84d9e9eed783> /var/containers/Bundle/Application/11F1F5DE-2F68-4331-A107-FAADCED42A1F/Ara.srv/Frameworks/Access.framework/MultiMedia" },
+                { content: "0x105f8c000 - 0x106147fff Usr.Track arm64  <682efa309eed33ce894bd1383988e38a> /var/containers/Bundle/Application/11F1F5DE-2F68-4331-A107-FAADCED42A1F/Ara.srv/Frameworks/UserTrack.framework/Tracking" },
+                { content: "Exception Type: EXC_BAD_ACCESS (SIGSEGV)" },
+                { content: "..." },
+                { content: "0   libobjc.A.dylib 0x00007fff6011713c objc_release + 28" },
+                { content: "1   ArasakaSrv 0x00000001000022ea @objc LoginViewController.__ivar_destroyer + 42" },
+                { content: "Status={0x80, 0x20, 00, 0x10, 00, 00, 00, 0x11, 0x1, 0x1, 00, 0x4, 0xf0, 0x2, 0x9, 00}" },
+                { content: "00 ArasakaAXSsrv [0] <Debug>: Sent message of " },
+                { content: "20 bytes" },
+                { content: "01 ArasakaAXSsrv [0] <Debug>: exit, err=0x0" },
+                { content: "02 ArasakaAXSsrv [0] <Debug>: mask=0xFF, bad=false" },
+                { content: "03 ArasakaAXSsrv [0] <Debug>: exit" },
+                { content: "04 ArasakaAXSsrv [0] <Debug>: entry" },
+                { content: "05 ArasakaAXSsrv [0] <Debug>: exit" },
+                { content: "06 ArasakaAXSsrv [0] <Debug>: entry" },
+                { content: "07 ArasakaAXSsrv [0] <Debug>: entry" },
+                { content: "08 ArasakaAXSsrv [0] <Debug>: txBufferLength=7 rxBufferLength=23" },
+                { content: "09 ArasakaAXSsrv [0] <Debug>: Wrote:     7B |" },
+                { content: "0x80 0x10 0x00 0x07 0x00 0x00 0x00" },
+                { content: "010 ArasakaAXSsrv [0] <Debug>:  Read:    23B |" },
+                { content: "0x00 0x00 0x00 0x00 0x00 0x00 0x00 0x80 0x20 0x00 0x10 0x00 0x00 0x00 0x11" },
+                { content: "(lldb) disassemble -a 0x00000001000022ea" },
+                { content: "SrvInsight`@objc LoginViewController.__ivar_destroyer:" },
+                { content: "0x1000022c0 <+0>: pushq %rbp" },
+                { content: "0x1000022c1 <+1>: movq %rsp, %rbp" },
+                { content: "0x1000022c4 <+4>: pushq %rbp" },
+                { content: "0x1000022c4 <+4>: pushq %rbx" },
+                { content: "0x1000022c5 <+5>: pushq %rax" },
+                { content: "0x1000022c6 <+6>: movq %rdi, %rbx " },
+                { content: "0x1000022c9 <+9>: movq 0x551e40(%rip), %rax      ;" },
+                { content: "direct field offset for LoginViewController.userName" },
+                { content: "0x1000022d0 <+16>: movq 0x10(%rbx,%rax), %rdi" },
+                { content: "0x1000022d5 <+21>: callq 0x1004adc90             ;" },
+                { content: "sfile_unknownRelease" },
+                { content: "0x1000022da <+26>: movq 0x551e37(%rip), %rax     ;" },
+                { content: "direct field offset for LoginViewController.database" },
+                { content: "0x1000022e1 <+33>: movq (%rbx,%rax), %rdi" },
+                { content: "0x1000022e5 <+37>: callq 0x1004bf9e6             ;" },
+                { content: "symbol stub for: objc_release" },
+                { content: "0x1000022ea <+42>: movq 0x551e2f(%rip), %rax     ;" },
+                { content: "direct field offset for LoginViewController.views" },
+                { content: "0x1000022f1 <+49>: movq (%rbx,%rax), %rdi" },
+                { content: "0x1000022f5 <+53>: addq $0x8, %rsp" },
+                { content: "0x1000022f9 <+57>: popq %rbx" },
+                { content: "0x1000022fa <+58>: popq %rbp" },
+                { content: "0x1000022fb <+59>: jmp 0x1004adec0               ;" },
+                { content: "name_bridgeObjectRelease" },
+                { content: "0x1000022ea <+42>: movq 0x551e2f(%rip), %rax     ;" },
+                { content: "user.views File restricted" },
+                { content: "0x1000022da <+26>: movq 0x551e37(%rip), %rax     ;" },
+                { content: "database.login.lock /open" },
+                { content: "0x1000022e1 <+33>: movq (%rbx,%rax), %rdi" },
+                { content: "0x1000022e5 <+37>: callq 0x1004bf9e6             ;" },
+                { content: "symbol stub for: surveillance_release" },
+                { content: "Crashed: srv.arasaka.jp" },
+                { content: "0  libdispatch.dylib              0x18316fae4 dispatch_group_leave$VARIANT$mp + 76" },
+                { content: "2  libdispatch.dylib              0x18316cb24 _dispatch_call_block_and_release + 24" },
+                { content: "x2079" },
+                { content: "WARNING:  at arch/x196/kernel/ara/ara.s:1600 native_ara_write_trojan_5+0x196/0x3e() (Not verified)" },
+                { content: "Hardware name: 5 1 6 8 2 N402" },
+                { content: "Modules called:" },
+                { content: "Pid: 0, comm: single Not verified 3.1.5.62.127-fc55.i2079 #2" },
+                { content: "Call TracE:" },
+                { content: "[<c0436d93>] warn_path_excess+08+89/0x87" },
+                { content: "[<c0446d93>] ?" },
+                { content: "native_ara_write_trojan_vid+0x44/0x21" },
+                { content: "[<c0412d73>] warn_path_wall_+0x10/0x4e" },
+                { content: "[<c040fd2c>] srv_init_thermal_warn+0xc3/0x128" },
+                { content: "[<c045rt9b>] ? mce_init+0xa9/0xbd" },
+                { content: "[<c040dcc9>] ucheck_init+0x37/0x6k" },
+                { content: "[<c065ea6e>] identify_usr+0xy5/Mx5x" },
+                { content: "[<c072vd5o>] identify_pass+08y/0x61" },
+                { content: "[<c08803df>] check_boot_access+0x8b/0x330" },
+                { content: "[<c099025x>]  delayacc_init0x47/0x70/0x77" },
+                { content: "[<c0910797x>] i2079_start_kernel_terminate+0x81/0x111" },
+                { content: "—[end login a7927b531f17c0a725xm]—" },
+                { content: "Authenticating credentials... Confirmed Arak_Server 320gsL connection... Established Accessing File /srd/slab/ara/:dt_000000319/falc_mim... Done Reading Package list... Done Protocol 21z5532 Bd0r... Activated Program GSNN531... Activated .--::////:--." },
+                { content: "`-/ydmNNNmmmmNNNmdy/ .+dNNmyo/+shddhs+/oymN .sNMdo-` .yNMMMMMMNy. `- `+NMd/`    hMMMMMMMMMMh     yMNo`     `MMMMMMMMMMMM`     yMN/`.:/+/.`yMMMMMMMMMMy`./+ +MM+/dNMMMMMdosmMMMMMMmsodMMMM `NMdoMMMMMMMMMMy`:hMMh:`yMMMMMM :MMoNMMMMMMMMMMM." },
+                { content: "oMMo .MMMMMMM /MM/dMMMMMMMMMMm` oMMo `mMMMMMM :MMo.hMMMMMMMMMh. oMMo .hMMMMMM `NMd  -ohddhssNMNsyMMysNMNsshddh +MM+         .sNMMMMMMNs`       yMM/          .sNMMNs." },
+                { content: "+NMm/`        oMMo        `/ .sNMmo-      oMMo      -omMN `+hMNmho/-.+dd+.-/ohNMMh+` `./sdmNNNNNNNNNNmds/.`.-:////:-.`....     ............`      `....`         `....         `....     ...    `.....``:sdmNNNNs-   mNNNNNNNNNNNm/  `/ymNNNNm+`     mM+NNNmy:    -sdmNNNNs- ." },
+                { content: "NNN``:smNNd  dddm`yNMNhsohNMNs. NMMhssssssdMMd -dMMmyssdMMmo` ///yyMMmyyy. `yNMNhsoyNMNy /MMMymMMNh +yNMNhsooMMd.    -mMMo NMMo`     :hhs dMMs`   `/MMM- `:ymMMm        MMd." },
+                { content: "-mMM hMMMMNh+.  /MMN-`  yMMy      dMMo dMMNdo-`       NMM+      MMM: ///./ymMMmy: `yMM       hMM hmMMMm+    +MMm`   -mMMh+:--`dMMo dNMmNMNdo-`    +NMNy/---`MMM/ MM+   +yNMMMm smMM  :--`hMM hmMMmMMNh+ -dMMdo:--.smNMMMNsdMMo ---.-odNMNdo-`  :hmMMMMN/MMM: dMMMMMMMMMMMM s.smNMMMMyhMM s---`:smMMN dmNNMMMMd`-////:://-      `-/////." },
+                { content: ".:////-///`` :///////////-  `-////:://-  ///    ////   ::////-//:/ ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++Welcome, Choombas." },
+                { content: "You have gained access to subprotocol functions. A mimetic self replicating glitch systems with a crash-priority override cybernetic virus has been launched to hide your unregistered access until93:12:20:28when the server will reset." },
+                { content: "You must crash the server before time is exceeded. Passphrase clues are limited and hidden d o N O T t h i n k y o u c a n d o t h i s a l o n e d o N O T c l o s e t h i s s e r v e rD O N O T F A I LT h e C l o c k i s T i c k i n g=Do you understand?" },
+                { content: "<y/n>y-----BEGIN ENCRYPTION-----zjixowjfoicjeficafjcoeijajeojfoejovjaojvajeojvczjbcyagcfefia-----END ENCRYPTION-----ENTER PASSPHRASE: pass1Incident Identifier: 4F85AD99-4240-BBC7-AEAFA51123FXCrashReport Key: ydmNNNmmmmNNNmdy/ .+dNNmyo/+shddhs+/oymN .sNMdo-` .yNMMMMMMNy." },
+                { content: "`- `+NMd/`    hMMMMMMMMMMh     yMNo`     `MMMMMMMMMMMM`     yMN/`.:/+/.`yMMMMMMMMMMy`./+ +MM+/dNMMMMMdosmMMMMMMmsodMMMM `NMdoMMMMMMMMMMy`:hMMh:`yMMMMMM :MMoNMMMMMMMMMMM." },
+                { content: "oMMo .MMMMMMM /MM/dMMMMMMMMMMm` oMMo `mMMMMMM :MMo.hMMMMMMMMMh. oMMo .hMMMMMM `NMd  -ohddhssNMNsyMMysNMNsshddh +MM+ .sNMMMMMMNs`       yMM/          .sNMMNs." },
+                { content: "+NMm/`  oMMo  `/ .sNMmo  oMMo      -omMN `+hMNmho/-.+dd+.-/ohNMMh+` `./sdmNNNNNNNNNNmds/.`.-:////:-.`....  ............``Nm+`     mM+NNNmy:    -sdmNNNNs- ." },
+                { content: "NNN``:smNNd dddm`yNMNhsohNMNs. NMMhssssssdMMd -dMMmyssdMMmo` ///yyMMmyyy. `yNMNhsoyNMNy /MMMymMMNh +yNMNhsooMMd.    -mMMo NM  :hhs dMMs`   `/MMM- `:ymMMm  MMd." },
+                { content: "-mMM hMMMMNh+.  /MMN-`  yMMy      dMMo dMMNdo-`       NMM+      MMM: ///./ymMMmy: `yMM hMM hmMMMm+    +MMm`   -mMMh+:--`dMMo dNMmNMNdo-`    +NMNy/---`MMM/ MM+   +yNMMMm smMM  :--`hMM hmMMmMMNh+ -dMMdo:--.smNMMMNsdMMo ---.-odNMNdo-`  :hmMMMMN/MMM: dMMMMMMMMMMMM s.smNMMMMyhMM c893648589c1ea8ba4209ce4725a52492c77d05addHardware: ArSrv 14.5.1Process:  Access [981052]Testing Passphrase... VerifiedPassphrase Accepted44.228.163.154ENTER PASSPHRASE: *****Path:/private/var/containers/Bundle/Runtime/F6XOF5DE1-8M02-4331-A107-FAADMED55A1F/Ara.srv/usr.appIdentifier: ara.jpVersion:    6.7.3.42 (6.7.3)Code Type:  CRS-196  {Native}Testing Passphrase... VerifiedPassphrase Accepted01001110 01101001 01100011 01100101 00100000 4F85AD99-4240-BBC7-AEAFA51123FXCrashReport Key: ydmNNNmmmmNNNmdy/ .+dNNmyo/+shddhs+/oymN .sNMdo-` .yNMMMMMMNy." },
+                { content: "`- `+NMd/`    hMMMMMMMMMMh     yMNo`     `MMMMMMMMMMMM`     yMN/`.:/+/.`yMMMMMMMMMMy`./+ +MM+/dNMMMMMdosmMMMMMMmsodMMMM `NMdoMMMMMMMMMMy`:hMMh:`yMMMMMM :MMoNMMMMMMMMMMM." },
+                { content: "oMMo .MMMMMMM /MM/dMMMMMMMMMMm` oMMo `mMMMMMM :MMo.hMMMMMMMMMh. oMMo .hMMMMMM `NMd  -ohddhssNMNsyMMysNMNsshddh +MM+ .sNMMMMMMNs`       yMM/          .sNMMNs." },
+                { content: "+NMm/`  oMMo  `/ .sNMmo  oMMo      -omMN `+hMNmho/-.+dd+.-/ohNMMh+` `./sdmNNNNNNNNNNmds/.`.-:////:-.`....  ............``Nm+`     mM+NNNmy:    -sdmNNNNs- ." },
+                { content: "NNN``:smNNd dddm`yNMNhsohNMNs. NMMhssssssdMMd -dMMmyssdMMmo` ///yyMMmyyy. `yNMNhsoyNMNy /MMMymMMNh +yNMNhsooMMd.    -mMMo NM  :hhs dMMs`   `/MMM- `:ymMMm  MMd." },
+                { content: "-mMM hMMMMNh+.  /MMN-`  yMMy      dMMo dMMNdo-`       NMM+      MMM: ///./ymMMmy: `yMM hMM hmMMMm+    +MMm`   -mMMh+:--`dMMo dNMmNMNdo-`    +NMNy/---`MMM/ MM+   +yNMMMm smMM  :--`hMM hmMMmMMNh+ -dMM01101101ENTER PASSPHRASE: pass3Role: LibraryParent Process:   launchR [1]Exception Type:   EXC_CRASH [SRCKILL]Exception Codes:  0x00000000000000, 0x0000000000000Testing Passphrase... VerifiedPassphrase AcceptedDownload?" },
+                { content: "<y/n>y[ ---- Download the audio file ----- ]mp3.jpegENTER PASSPHRASE: ****pass4Exception Note:   EXC_CRS_NOTIFYTerminal Reason:  Namespace_EURODYNE, Code 0x8badff00dTesting Passphrase... VerifiedPassphrase AcceptedENTER PASSPHRASE: ****pass5Termination Description:  ACCESS, file-create watchdog violation: arasaka.srv exhausted access allow time 5.81 |" },
+                { content: "ProcessVisibility: Background | ProcessState: Running | Violation | video-view |" },
+                { content: "CPU elapsed Triggered by Thread: 0Filtered syslog:None foundExecute boot sequence...Testing Passphrase... VerifiedPassphrase Accepted Thread 0 crashed with ARM Thread State (64-bit) x0: 0x00000001b76acea0   x1: 0x000000018fbd3fbd   x2: 0x000000010cb17260   x3: 0x0000000000000001x4: 0x0000000000000000   x5: 0x0000000000000001   x6: 0x0000000000000020   x7: 0x0000000000000004x8: 0x0000000109a34380   x9: 0x0000000109a34310  x10: 0x0000000109a34311  x11: 0x0000000109a3431x12: 0x000000010c8e3cb0  x13: 0x0000000000000000  x14: 0x0000000000000000  x15: 0x000000018fbd49dx16: 0x00000001b76acea0  x17: 0x0000000000000000  x18: 0x0000000000000000  x19: 0x000000018fbd3fbx20: 0x0000000109a34318  x21: 0x0000000109a34388  x22: 0x00000001b766cfd0  x23: 0x000000000000000x24: 0x00000001b76acea0  x25: 0x0000000000000000  x26: 0x00000001b766e000  x27: 0x00000000ffed828x28: 0x0000000000000000 " },
+                { content: "  fp: 0x000000016f969e90   lr: 0x0000000184475aa8sp: 0x000000016f969e70   pc: 0x0000000184475da8 cpsr: 0x800000000x100490000 - 0x103cabfff Arasaka <6499420763bf3621abf3f6218adc6354> /var/containers/Bundle/Application/11F1F5DE-2F68-4331-A107-FAADCED42A1F/Ara.srv/Arasaka0x104ce8000 - 0x104e1ffff MMCommon arm64  <85b8839214673db29e3b6a4eeaaacba7> /var/containers/Bundle/Application/11F1F5DE-2F68-4331-A107-FAADCED42A1F/Ara.srv/Frameworks/MMCommon.framework/MMCommon0x104e68000 - 0x104ea3fff dyld arm64  <06dc98224ae03573bf72c78810c81a78> /usr/lib/dyld0x104F85AD99-4240-BBC7-AEAFA51123FXCrashReport Key: ydmNNNmmmmNNNmdy/ .+dNNmyo/+shddhs+/oymN .sNMdo-` .yNMMMMMMNy." },
+                { content: "`- `+NMd/`    hMMMMMMMMMMh     yMNo`     `MMMMMMMMMMMM`     yMN/`.:/+/.`yMMMMMMMMMMy`./+ +MM+/dNMMMMMdosmMMMMMMmsodMMMM `NMdoMMMMMMMMMMy`:hMMh:`yMMMMMM :MMoNMMMMMMMMMMM." },
+                { content: "oMMo .MMMMMMM /MM/dMMMMMMMMMMm` oMMo `mMMMMMM :MMo.hMMMMMMMMMh. oMMo .hMMMMMM `NMd  -ohddhssNMNsyMMysNMNsshddh +MM+ .sNMMMMMMNs`       yMM/          .sNMMNs." },
+                { content: "+NMm/`  oMMo  `/ .sNMmo  oMMo      -omMN `+hMNmho/-.+dd+.-/ohNMMh+` `./sdmNNNNNNNNNNmds/.`.-:////:-.`....  ............``Nm+`     mM+NNNmy:    -sdmNNNNs- ." },
+                { content: "NNN``:smNNd dddm`yNMNhsohNMNs. NMMhssssssdMMd -dMMmyssdMMmo` ///yyMMmyyy. `yNMNhsoyNMNy /MMMymMMNh +yNMNhsooMMd.    -mMMo NM  :hhs dMMs`   `/MMM- `:ymMMm  MMd." },
+                { content: "-mMM hMMMMNh+.  /MMN-`  yMMy      dMMo dMMNdo-`       NMM+      MMM: ///./ymMMmy: `yMM hMM hmMMMm+    +MMm`   -mMMh+:--`dMMo dNMmNMNdo-`    +NMNy/---`MMM/ MM+   +yNMMMm smMM  :--`hMM hmMMmMMNh+ -dMM4efc000 - 0x1051bbfff TXLiteAVSDK_Smart_No_VOD arm64  <94b2ab6b3c863923b321327155770286> /var/containers/Bundle/Application/11F1F5DE-2F68-4331-A107-FAADCED42A1F/Ara.srv/Frameworks/TXLiteAVSDK_Smart_No_VOD.framework/TXLiteAVSDK_Smart_No_VOD0x1055e4000 - 0x10572ffff WCDB arm64  <c1b1509046923a93b29755fe25526e00> /var/containers/Bundle/Application/11F1F5DE-2F68-4331-A107-FAADCED42A1F/Ara.srv/Frameworks/ARA.framework/ARA0x10587c000 - 0x105c7bfff MultiMedia arm64  <b456f7d1d8ba3eadb83d84d9e9eed783> /var/containers/Bundle/Application/11F1F5DE-2F68-4331-A107-FAADCED42A1F/Ara.srv/Frameworks/Access.framework/MultiMedia0x105f8c000 - 0x106147fff Usr.Track arm64  <682efa309eed33ce894bd1383988e38a> /var/containers/Bundle/Application/11F1F5DE-2F68-4331-A107-FAADCED42A1F/Ara.srv/Frameworks/UserTrack.framework/TrackingException Type: EXC_BAD_ACCESS (SIGSEGV)...0   libobjc.A.dylib 0x00007fff6011713c objc_release + 281   ArasakaSrv 0x00000001000022ea @objc LoginViewController.__ivar_destroyer + 42Status={0x80, 0x20, 00, 0x10, 00, " },
+                { content: "00, 00, 0x11, 0x1, 0x1, 00, 0x4, 0xf0, 0x2, 0x9, 00}00 ArasakaAXSsrv [0] <Debug>: Sent message of 20 bytes01 ArasakaAXSsrv [0] <Debug>: exit, err=0x002 ArasakaAXSsrv [0] <Debug>: mask=0xFF, bad=false03 ArasakaAXSsrv [0] <Debug>: exit04 ArasakaAXSsrv [0] <Debug>: entry05 ArasakaAXSsrv [0] <Debug>: exit06 ArasakaAXSsrv [0] <Debug>: entry07 ArasakaAXSsrv [0] <Debug>: entry08 ArasakaAXSsrv [0] <Debug>: txBufferLength=7 rxBufferLength=2309 ArasakaAXSsrv [0] <Debug>: WrotB |" },
+                { content: "0x80 0x10 0x00 0x07 0x00 0x00 0x00010 ArasakaAXSsrv [0] <Debug>:  Rea23B |" },
+                { content: "0x00 0x00 0x00 0x00 0x00 0x00 0x00 0x80 0x20 0x00 0x10 0x00 0x00 0x00 0x11(lldb) disassemble -a 0x00000001000022eaSrvInsight`@objc LoginViewController.__ivar_destroyer:0x1000022c0 <+0>: pushq %rbp0x1000022c1 <+1>: movq %rsp, %rbp0x1000022c4 <+4>: pushq %rbp0x1000022c4 <+4>: pushq %rbx0x1000022c5 <+5>: pushq %rax0x1000022c6 <+6>: movq %rdi, %rbx 0x1000022c9 <+9>: movq 0x551e40(%rip), %rax      ;" },
+                { content: "direct field offset for LoginViewController.userName0x1000022d0 <+16>: movq 0x10(%rbx,%rax), %rdi0x1000022d5 <+21>: callq 0x1004adc90    ;ffset for LoginViewController.database0x1000022e1 <+33>: movq (%rbx,%rax), %rdi0x1000022e5 <+37>: callq 0x1004bf9e6 ;" },
+                { content: "symbol stub for: objc_release0x1000022ea <+42>: movq 0x551e2f(%rip), %rax direct field offset for LoginViewController.views0x1000022f1 <+49>: movq (%rbx,%rax), %rdi0x1000022f5 <+53>: addq $0x8, %rsp0x1000022f9 <+57>: popq %rbx0x1000022fa <+58>: popq %rbp0x1000022fb <+59>: jmp 0x1004ad;" },
+                { content: "4F85AD99-4240-BBC7-AEAFA51123FXCrashReport Key: ydmNNNmmmmNNNmdy/ .+dNNmyo/+shddhs+/oymN .sNMdo-` .yNMMMMMMNy. `- `+NMd/`    hMMMMMMMMMMh     yMNo`     `MMMMMMMMMMMM`     yMN/`.:/+/.`yMMMMMMMMMMy`./+ +MM+/dNMMMMMdosmMMMMMMmsodMMMM `NMdoMMMMMMMMMMy`:hMMh:`yMMMMMM :MMoNMMMMMMMMMMM." },
+                { content: "oMMo .MMMMMMM /MM/dMMMMMMMMMMm` oMMo `mMMMMMM :MMo.hMMMMMMMMMh. oMMo .hMMMMMM `NMd  -ohddhssNMNsyMMysNMNsshddh +MM+ .sNMMMMMMNs`       yMM/          .sNMMNs." },
+                { content: "+NMm/`  oMMo  `/ .sNMmo  oMMo      -omMN `+hMNmho/-.+dd+.-/ohNMMh+` `./sdmNNNNNNNNNNmds/.`.-:////:-.`....  ............``Nm+`     mM+NNNmy:    -sdmNNNNs- ." },
+                { content: "NNN``:smNNd dddm`yNMNhsohNMNs. NMMhssssssdMMd -dMMmyssdMMmo` ///yyMMmyyy. `yNMNhsoyNMNy /MMMymMMNh +yNMNhsooMMd.    -mMMo NM  :hhs dMMs`   `/MMM- `:ymMMm  MMd." },
+                { content: "-mMM hMMMMNh+.  /MMN-`  yMMy      dMMo dMMNdo-`       NMM+      MMM: ///./ymMMmy: `yMM hMM hmMMMm+    +MMm`   -mMMh+:--`dMMo dNMmNMNdo-`    +NMNy/---`MMM/ MM+   +yNMMMm smMM  :--`hMM hmMMmMMNh+ -dMMname_bridgeObjectRelease0x1000022ea <+42>: movq 0x551e2f(%rip), %rn.lock /open0x1000022e1 <+33>: movq (%rbx,%rax), %rdi0x1000022e5 <+37>: callq 0x1004bf9e6 ;" },
+                { content: "symbol stub for: surveillance_releaseCrashed: srv.arasaka.jp0  libdispatch.dyl 0x18316cb24 _dispatch_call_block_and_release + 24x2079WARNING:  at arch/x196/kernel/ara/ara.s:1600 native_ara_write_trojan_5+0x196/0x3e() (Not verified)Hardware name: 5 1 6 8 2 N402Modules called:Pid: 0, comm: single Not verified 3.1.5.62.127-fc55.i2079 #2Call TracE:[<c0436d93>] warn_path_excess+08+89/0x87[<c0446d93>] ?" },
+                { content: "native_ara_write_trojan_vid+0x44/0x21[<c0412d73>] warn_path_wall_+0x10/0x4e[<c040fd2c>] srv_init_thermal_warn+0xc3/0x128[<c045rt9b>] ? mce_init+0xa9/0xbd[<c040dcc9>] ucheck_init+0x37/0x6k[<c065ea6e>] identify_usr+0xy5/Mx5x[<c072vd5o>] identify_pass+08y/0x61[<c08803df>] check_boot_access+0x8b/0x330[<c099025x>]  delayacc_init0x47/0x70/0x77[<c0910797x>] i2079_start_kernel_terminate+0x81/0x111[end login a7927b531f17c0a725xm]—" },
+                { content: "Authenticating credentials... Confirmed Arak_Server 320gsL connection... Established Accessing File /srd/slab/ara/:dt_000000319/falc_mim... Done Reading Package list... Done Protocol 21z5532 Bd0r... Activated Program GSNN531... Activated .--::////:--." },
+                { content: "`-/ydmNNNmmmmNNNmdy/ .+dNNmyo/+shddhs+/oymN .sNMdo-` .yNMMMMMMNy. `- `+NMd/`    hMMMMMMMMMMh     yMNo`     `MMMMMMMMMMMM`     yMN/`.:/+/.`yMMMMMMMMMMy`./+ +MM+/dNMMMMMdosmMMMMMMmsodMMMM `NMdoMMMMMMMMMMy`:hMMh:`yMMMMMM :MMoNMMMMMMMMMMM." },
+                { content: "oMMo .MMMMMMM /MM/dMMMMMMMMMMm` oMMo `mMMMMMM :MMo.hMMMMMMMMMh. oMMo .hMMMMMM `NMd  -ohddhssNMNsyMMysNMNsshddh +MM+         .sNMMMMMMNs`       yMM/          .sNMMNs." },
+                { content: "+NMm/`        oMMo        `/ .sNMmo-      oMMo      -omMN `+hMNmho/-.+dd+.-/ohNMMh+` `./sdmNNNNNNNNNNmds/.`.-:////:-.`....     ............`      `....`         `....         `....     ...    `.....``:sdmNNNNs-   mNNNNNNNNNNNm/  `/ymNNNNm+`     mM+NNNmy:    -sdmNNNNs- ." },
+                { content: "NNN``:smNNd  dddm`yNMNhsohNMNs. NMMhssssssdMMd -dMMmyssdMMmo` ///yyMMmyyy. `yNMNhsoyNMNy /MMMymMMNh +yNMNhsooMMd.    -mMMo NMMo`     :hhs dMMs`   `/MMM- `:ymMMm        MMd." },
+                { content: "-mMM hMMMMNh+.  /MMN-`  yMMy      dMMo dMMNdo-`       NMM+      MMM: ///./ymMMmy: `yMM       hMM hmMMMm+    +MMm`   -mMMh+:--`dMMo dNMmNMNdo-`    +NMNy/---`MMM/ MM+   +yNMMMm smMM  :--`hMM hmMMmMMNh+ -dMMdo:--.smNMMMNsdMMo ---.-odNMNdo-`  :hmMMMMN/MMM: dMMMMMMMMMMMM s.smNMMMMyhMM s---`:smMMN dmNNMMMMd`-////:://-      `-/////." },
+                { content: ".:////-///`` :///////////-  `-////:://-  ///    ////   ::////-//:/ ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++Welcome, Choombas." },
+                { content: "You have gained access to subprotocol functions. A mimetic self replicating glitch systems with a crash-priority override cybernetic virus has been launched to hide your unregistered access until93:12:20:28when the server will reset." },
+                { content: "You must crash the server before time is exceeded. Passphrase clues are limited and hidden d o N O T t h i n k y o u c a n d o t h i s a l o n e d o N O T c l o s e t h i s s e r v e rD O N O T F A I LT h e C l o c k i s T i c k i n g=Do you understand?" },
+                { content: "<y/n>y-----BEGIN ENCRYPTION-----zjixowjfoicjeficafjcoeijajeojfoejovjaojvajeojvczjbcyagcfefia-----END ENCRYPTION-----ENTER PASSPHRASE: pass1Incident Identifier: 4F85AD99-4240-BBC7-AEAFA51123FXCrashReport Key: ydmNNNmmmmNNNmdy/ .+dNNmyo/+shddhs+/oymN .sNMdo-` .yNMMMMMMNy." },
+                { content: "`- `+NMd/`    hMMMMMMMMMMh     yMNo`     `MMMMMMMMMMMM`     yMN/`.:/+/.`yMMMMMMMMMMy`./+ +MM+/dNMMMMMdosmMMMMMMmsodMMMM `NMdoMMMMMMMMMMy`:hMMh:`yMMMMMM :MMoNMMMMMMMMMMM." },
+                { content: "oMMo .MMMMMMM /MM/dMMMMMMMMMMm` oMMo `mMMMMMM :MMo.hMMMMMMMMMh. oMMo .hMMMMMM `NMd  -ohddhssNMNsyMMysNMNsshddh +MM+ .sNMMMMMMNs`       yMM/          .sNMMNs." },
+                { content: "+NMm/`  oMMo  `/ .sNMmo  oMMo      -omMN `+hMNmho/-.+dd+.-/ohNMMh+` `./sdmNNNNNNNNNNmds/.`.-:////:-.`....  ............``Nm+`     mM+NNNmy:    -sdmNNNNs- ." },
+                { content: "NNN``:smNNd dddm`yNMNhsohNMNs. NMMhssssssdMMd -dMMmyssdMMmo` ///yyMMmyyy. `yNMNhsoyNMNy /MMMymMMNh +yNMNhsooMMd.    -mMMo NM  :hhs dMMs`   `/MMM- `:ymMMm  MMd." },
+                { content: "-mMM hMMMMNh+.  /MMN-`  yMMy      dMMo dMMNdo-`       NMM+      MMM: ///./ymMMmy: `yMM hMM hmMMMm+    +MMm`   -mMMh+:--`dMMo dNMmNMNdo-`    +NMNy/---`MMM/ MM+   +yNMMMm smMM  :--`hMM hmMMmMMNh+ -dMMdo:--.smNMMMNsdMMo ---.-odNMNdo-`  :hmMMMMN/MMM: dMMMMMMMMMMMM s.smNMMMMyhMM c893648589c1ea8ba4209ce4725a52492c77d05addHardware: ArSrv 14.5.1Process:  Access [981052]Testing Passphrase... VerifiedPassphrase Accepted44.228.163.154ENTER PASSPHRASE: *****Path:/private/var/containers/Bundle/Runtime/F6XOF5DE1-8M02-4331-A107-FAADMED55A1F/Ara.srv/usr.appIdentifier: ara.jpVersion:    6.7.3.42 (6.7.3)Code Type:  CRS-196  {Native}Testing Passphrase... VerifiedPassphrase Accepted01001110 01101001 01100011 01100101 00100000 4F85AD99-4240-BBC7-AEAFA51123FXCrashReport Key: ydmNNNmmmmNNNmdy/ .+dNNmyo/+shddhs+/oymN .sNMdo-` .yNMMMMMMNy." },
+                { content: "`- `+NMd/`    hMMMMMMMMMMh     yMNo`     `MMMMMMMMMMMM`     yMN/`.:/+/.`yMMMMMMMMMMy`./+ +MM+/dNMMMMMdosmMMMMMMmsodMMMM `NMdoMMMMMMMMMMy`:hMMh:`yMMMMMM :MMoNMMMMMMMMMMM." },
+                { content: "oMMo .MMMMMMM /MM/dMMMMMMMMMMm` oMMo `mMMMMMM :MMo.hMMMMMMMMMh. oMMo .hMMMMMM `NMd  -ohddhssNMNsyMMysNMNsshddh +MM+ .sNMMMMMMNs`       yMM/          .sNMMNs." },
+                { content: "+NMm/`  oMMo  `/ .sNMmo  oMMo      -omMN `+hMNmho/-.+dd+.-/ohNMMh+` `./sdmNNNNNNNNNNmds/.`.-:////:-.`....  ............``Nm+`     mM+NNNmy:    -sdmNNNNs- ." },
+                { content: "NNN``:smNNd dddm`yNMNhsohNMNs. NMMhssssssdMMd -dMMmyssdMMmo` ///yyMMmyyy. `yNMNhsoyNMNy /MMMymMMNh +yNMNhsooMMd.    -mMMo NM  :hhs dMMs`   `/MMM- `:ymMMm  MMd." },
+                { content: "-mMM hMMMMNh+.  /MMN-`  yMMy      dMMo dMMNdo-`       NMM+      MMM: ///./ymMMmy: `yMM hMM hmMMMm+    +MMm`   -mMMh+:--`dMMo dNMmNMNdo-`    +NMNy/---`MMM/ MM+   +yNMMMm smMM  :--`hMM hmMMmMMNh+ -dMM01101101ENTER PASSPHRASE: pass3Role: LibraryParent Process:   launchR [1]Exception Type:   EXC_CRASH [SRCKILL]Exception Codes:  0x00000000000000, 0x0000000000000Testing Passphrase... VerifiedPassphrase AcceptedDownload?" },
+                { content: "<y/n>y[ ---- Download the audio file ----- ]mp3.jpegENTER PASSPHRASE: ****pass4Exception Note:   EXC_CRS_NOTIFYTerminal Reason:  Namespace_EURODYNE, Code 0x8badff00dTesting Passphrase... VerifiedPassphrase AcceptedENTER PASSPHRASE: ****pass5Termination Description:  ACCESS, file-create watchdog violation: arasaka.srv exhausted access allow time 5.81 |" },
+                { content: "ProcessVisibility: Background | ProcessState: Running | Violation | video-view |" },
+                { content: "CPU elapsed Triggered by Thread: 0Filtered syslog:None foundExecute boot sequence...Testing Passphrase... VerifiedPassphrase Accepted Thread 0 crashed with ARM Thread State (64-bit) x0: 0x00000001b76acea0   x1: 0x000000018fbd3fbd   x2: 0x000000010cb17260   x3: 0x0000000000000001x4: 0x0000000000000000   x5: 0x0000000000000001   x6: 0x0000000000000020   x7: 0x0000000000000004x8: 0x0000000109a34380   x9: 0x0000000109a34310  x10: 0x0000000109a34311  x11: 0x0000000109a3431x12: 0x000000010c8e3cb0  x13: 0x0000000000000000  x14: 0x0000000000000000  x15: 0x000000018fbd49dx16: 0x00000001b76acea0  x17: 0x0000000000000000  x18: 0x0000000000000000  x19: 0x000000018fbd3fbx20: 0x0000000109a34318  x21: 0x0000000109a34388  x22: 0x00000001b766cfd0  x23: 0x000000000000000x24: 0x00000001b76acea0  x25: 0x0000000000000000  x26: 0x00000001b766e000  x27: 0x00000000ffed828x28: 0x0000000000000000 " },
+                { content: "  fp: 0x000000016f969e90   lr: 0x0000000184475aa8sp: 0x000000016f969e70   pc: 0x0000000184475da8 cpsr: 0x800000000x100490000 - 0x103cabfff Arasaka <6499420763bf3621abf3f6218adc6354> /var/containers/Bundle/Application/11F1F5DE-2F68-4331-A107-FAADCED42A1F/Ara.srv/Arasaka0x104ce8000 - 0x104e1ffff MMCommon arm64  <85b8839214673db29e3b6a4eeaaacba7> /var/containers/Bundle/Application/11F1F5DE-2F68-4331-A107-FAADCED42A1F/Ara.srv/Frameworks/MMCommon.framework/MMCommon0x104e68000 - 0x104ea3fff dyld arm64  <06dc98224ae03573bf72c78810c81a78> /usr/lib/dyld0x104F85AD99-4240-BBC7-AEAFA51123FXCrashReport Key: ydmNNNmmmmNNNmdy/ .+dNNmyo/+shddhs+/oymN .sNMdo-` .yNMMMMMMNy." },
+                { content: "`- `+NMd/`    hMMMMMMMMMMh     yMNo`     `MMMMMMMMMMMM`     yMN/`.:/+/.`yMMMMMMMMMMy`./+ +MM+/dNMMMMMdosmMMMMMMmsodMMMM `NMdoMMMMMMMMMMy`:hMMh:`yMMMMMM :MMoNMMMMMMMMMMM." },
+                { content: "oMMo .MMMMMMM /MM/dMMMMMMMMMMm` oMMo `mMMMMMM :MMo.hMMMMMMMMMh. oMMo .hMMMMMM `NMd  -ohddhssNMNsyMMysNMNsshddh +MM+ .sNMMMMMMNs`       yMM/          .sNMMNs." },
+                { content: "+NMm/`  oMMo  `/ .sNMmo  oMMo      -omMN `+hMNmho/-.+dd+.-/ohNMMh+` `./sdmNNNNNNNNNNmds/.`.-:////:-.`....  ............``Nm+`     mM+NNNmy:    -sdmNNNNs- ." },
+                { content: "NNN``:smNNd dddm`yNMNhsohNMNs. NMMhssssssdMMd -dMMmyssdMMmo` ///yyMMmyyy. `yNMNhsoyNMNy /MMMymMMNh +yNMNhsooMMd.    -mMMo NM  :hhs dMMs`   `/MMM- `:ymMMm  MMd." },
+                { content: "-mMM hMMMMNh+.  /MMN-`  yMMy      dMMo dMMNdo-`       NMM+      MMM: ///./ymMMmy: `yMM hMM hmMMMm+    +MMm`   -mMMh+:--`dMMo dNMmNMNdo-`    +NMNy/---`MMM/ MM+   +yNMMMm smMM  :--`hMM hmMMmMMNh+ -dMM4efc000 - 0x1051bbfff TXLiteAVSDK_Smart_No_VOD arm64  <94b2ab6b3c863923b321327155770286> /var/containers/Bundle/Application/11F1F5DE-2F68-4331-A107-FAADCED42A1F/Ara.srv/Frameworks/TXLiteAVSDK_Smart_No_VOD.framework/TXLiteAVSDK_Smart_No_VOD0x1055e4000 - 0x10572ffff WCDB arm64  <c1b1509046923a93b29755fe25526e00> /var/containers/Bundle/Application/11F1F5DE-2F68-4331-A107-FAADCED42A1F/Ara.srv/Frameworks/ARA.framework/ARA0x10587c000 - 0x105c7bfff MultiMedia arm64  <b456f7d1d8ba3eadb83d84d9e9eed783> /var/containers/Bundle/Application/11F1F5DE-2F68-4331-A107-FAADCED42A1F/Ara.srv/Frameworks/Access.framework/MultiMedia0x105f8c000 - 0x106147fff Usr.Track arm64  <682efa309eed33ce894bd1383988e38a> /var/containers/Bundle/Application/11F1F5DE-2F68-4331-A107-FAADCED42A1F/Ara.srv/Frameworks/UserTrack.framework/TrackingException Type: EXC_BAD_ACCESS (SIGSEGV)...0   libobjc.A.dylib 0x00007fff6011713c objc_release + 281   ArasakaSrv 0x00000001000022ea @objc LoginViewController.__ivar_destroyer + 42Status={0x80, 0x20, 00, 0x10, 00, " },
+                { content: "00, 00, 0x11, 0x1, 0x1, 00, 0x4, 0xf0, 0x2, 0x9, 00}00 ArasakaAXSsrv [0] <Debug>: Sent message of 20 bytes01 ArasakaAXSsrv [0] <Debug>: exit, err=0x002 ArasakaAXSsrv [0] <Debug>: mask=0xFF, bad=false03 ArasakaAXSsrv [0] <Debug>: exit04 ArasakaAXSsrv [0] <Debug>: entry05 ArasakaAXSsrv [0] <Debug>: exit06 ArasakaAXSsrv [0] <Debug>: entry07 ArasakaAXSsrv [0] <Debug>: entry08 ArasakaAXSsrv [0] <Debug>: txBufferLength=7 rxBufferLength=2309 ArasakaAXSsrv [0] <Debug>: WrotB |" },
+                { content: "0x80 0x10 0x00 0x07 0x00 0x00 0x00010 ArasakaAXSsrv [0] <Debug>:  Rea23B |" },
+                { content: "0x00 0x00 0x00 0x00 0x00 0x00 0x00 0x80 0x20 0x00 0x10 0x00 0x00 0x00 0x11(lldb) disassemble -a 0x00000001000022eaSrvInsight`@objc LoginViewController.__ivar_destroyer:0x1000022c0 <+0>: pushq %rbp0x1000022c1 <+1>: movq %rsp, %rbp0x1000022c4 <+4>: pushq %rbp0x1000022c4 <+4>: pushq %rbx0x1000022c5 <+5>: pushq %rax0x1000022c6 <+6>: movq %rdi, %rbx 0x1000022c9 <+9>: movq 0x551e40(%rip), %rax      ;" },
+                { content: "direct field offset for LoginViewController.userName0x1000022d0 <+16>: movq 0x10(%rbx,%rax), %rdi0x1000022d5 <+21>: callq 0x1004adc90    ;ffset for LoginViewController.database0x1000022e1 <+33>: movq (%rbx,%rax), %rdi0x1000022e5 <+37>: callq 0x1004bf9e6 ;" },
+                { content: "symbol stub for: objc_release0x1000022ea <+42>: movq 0x551e2f(%rip), %rax direct field offset for LoginViewController.views0x1000022f1 <+49>: movq (%rbx,%rax), %rdi0x1000022f5 <+53>: addq $0x8, %rsp0x1000022f9 <+57>: popq %rbx0x1000022fa <+58>: popq %rbp0x1000022fb <+59>: jmp 0x1004ad;" },
+                { content: "4F85AD99-4240-BBC7-AEAFA51123FXCrashReport Key: ydmNNNmmmmNNNmdy/ .+dNNmyo/+shddhs+/oymN .sNMdo-` .yNMMMMMMNy. `- `+NMd/`    hMMMMMMMMMMh     yMNo`     `MMMMMMMMMMMM`     yMN/`.:/+/.`yMMMMMMMMMMy`./+ +MM+/dNMMMMMdosmMMMMMMmsodMMMM `NMdoMMMMMMMMMMy`:hMMh:`yMMMMMM :MMoNMMMMMMMMMMM." },
+                { content: "oMMo .MMMMMMM /MM/dMMMMMMMMMMm` oMMo `mMMMMMM :MMo.hMMMMMMMMMh. oMMo .hMMMMMM `NMd  -ohddhssNMNsyMMysNMNsshddh +MM+ .sNMMMMMMNs`       yMM/          .sNMMNs." },
+                { content: "+NMm/`  oMMo  `/ .sNMmo  oMMo      -omMN `+hMNmho/-.+dd+.-/ohNMMh+` `./sdmNNNNNNNNNNmds/.`.-:////:-.`....  ............``Nm+`     mM+NNNmy:    -sdmNNNNs- ." },
+                { content: "NNN``:smNNd dddm`yNMNhsohNMNs. NMMhssssssdMMd -dMMmyssdMMmo` ///yyMMmyyy. `yNMNhsoyNMNy /MMMymMMNh +yNMNhsooMMd.    -mMMo NM  :hhs dMMs`   `/MMM- `:ymMMm  MMd." },
+                { content: "-mMM hMMMMNh+.  /MMN-`  yMMy      dMMo dMMNdo-`       NMM+      MMM: ///./ymMMmy: `yMM hMM hmMMMm+    +MMm`   -mMMh+:--`dMMo dNMmNMNdo-`    +NMNy/---`MMM/ MM+   +yNMMMm smMM  :--`hMM hmMMmMMNh+ -dMMname_bridgeObjectRelease0x1000022ea <+42>: movq 0x551e2f(%rip), %rn.lock /open0x1000022e1 <+33>: movq (%rbx,%rax), %rdi0x1000022e5 <+37>: callq 0x1004bf9e6 ;" },
+                { content: "symbol stub for: surveillance_releaseCrashed: srv.arasaka.jp0  libdispatch.dyl 0x18316cb24 _dispatch_call_block_and_release + 24x2079WARNING:  at arch/x196/kernel/ara/ara.s:1600 native_ara_write_trojan_5+0x196/0x3e() (Not verified)Hardware name: 5 1 6 8 2 N402Modules called:Pid: 0, comm: single Not verified 3.1.5.62.127-fc55.i2079 #2Call TracE:[<c0436d93>] warn_path_excess+08+89/0x87[<c0446d93>] ?" },
+                { content: "native_ara_write_trojan_vid+0x44/0x21[<c0412d73>] warn_path_wall_+0x10/0x4e[<c040fd2c>] srv_init_thermal_warn+0xc3/0x128[<c045rt9b>] ? mce_init+0xa9/0xbd[<c040dcc9>] ucheck_init+0x37/0x6k[<c065ea6e>] identify_usr+0xy5/Mx5x[<c072vd5o>] identify_pass+08y/0x61[<c08803df>] check_boot_access+0x8b/0x330[<c099025x>]  delayacc_init0x47/0x70/0x77[<c0910797x>] i2079_start_kernel_terminate+0x81/0x111[end login a7927b531f17c0a725xm]—" },
+                { content: "Authenticating credentials... Confirmed Arak_Server 320gsL connection... Established Accessing File /srd/slab/ara/:dt_000000319/falc_mim... Done Reading Package list... Done Protocol 21z5532 Bd0r... Activated Program GSNN531... Activated .--::////:--." },
+                { content: "`-/ydmNNNmmmmNNNmdy/ .+dNNmyo/+shddhs+/oymN .sNMdo-` .yNMMMMMMNy. `- `+NMd/`    hMMMMMMMMMMh     yMNo`     `MMMMMMMMMMMM`     yMN/`.:/+/.`yMMMMMMMMMMy`./+ +MM+/dNMMMMMdosmMMMMMMmsodMMMM `NMdoMMMMMMMMMMy`:hMMh:`yMMMMMM :MMoNMMMMMMMMMMM." },
+                { content: "oMMo .MMMMMMM /MM/dMMMMMMMMMMm` oMMo `mMMMMMM :MMo.hMMMMMMMMMh. oMMo .hMMMMMM `NMd  -ohddhssNMNsyMMysNMNsshddh +MM+         .sNMMMMMMNs`       yMM/          .sNMMNs." },
+                { content: "+NMm/`        oMMo        `/ .sNMmo-      oMMo      -omMN `+hMNmho/-.+dd+.-/ohNMMh+` `./sdmNNNNNNNNNNmds/.`.-:////:-.`....     ............`      `....`         `....         `....     ...    `.....``:sdmNNNNs-   mNNNNNNNNNNNm/  `/ymNNNNm+`     mM+NNNmy:    -sdmNNNNs- ." },
+                { content: "NNN``:smNNd  dddm`yNMNhsohNMNs. NMMhssssssdMMd -dMMmyssdMMmo` ///yyMMmyyy. `yNMNhsoyNMNy /MMMymMMNh +yNMNhsooMMd.    -mMMo NMMo`     :hhs dMMs`   `/MMM- `:ymMMm        MMd." },
+                { content: "-mMM hMMMMNh+.  /MMN-`  yMMy      dMMo dMMNdo-`       NMM+      MMM: ///./ymMMmy: `yMM       hMM hmMMMm+    +MMm`   -mMMh+:--`dMMo dNMmNMNdo-`    +NMNy/---`MMM/ MM+   +yNMMMm smMM  :--`hMM hmMMmMMNh+ -dMMdo:--.smNMMMNsdMMo ---.-odNMNdo-`  :hmMMMMN/MMM: dMMMMMMMMMMMM s.smNMMMMyhMM s---`:smMMN dmNNMMMMd`-////:://-      `-/////." },
+                { content: ".:////-///`` :///////////-  `-////:://-  ///    ////   ::////-//:/ ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++Welcome, Choombas." },
+                { content: "You have gained access to subprotocol functions. A mimetic self replicating glitch systems with a crash-priority override cybernetic virus has been launched to hide your unregistered access until93:12:20:28when the server will reset." },
+                { content: "You must crash the server before time is exceeded. Passphrase clues are limited and hidden d o N O T t h i n k y o u c a n d o t h i s a l o n e d o N O T c l o s e t h i s s e r v e rD O N O T F A I LT h e C l o c k i s T i c k i n g=Do you understand?" },
+                { content: "<y/n>y-----BEGIN ENCRYPTION-----zjixowjfoicjeficafjcoeijajeojfoejovjaojvajeojvczjbcyagcfefia-----END ENCRYPTION-----ENTER PASSPHRASE: pass1Incident Identifier: 4F85AD99-4240-BBC7-AEAFA51123FXCrashReport Key: ydmNNNmmmmNNNmdy/ .+dNNmyo/+shddhs+/oymN .sNMdo-` .yNMMMMMMNy." },
+                { content: "`- `+NMd/`    hMMMMMMMMMMh     yMNo`     `MMMMMMMMMMMM`     yMN/`.:/+/.`yMMMMMMMMMMy`./+ +MM+/dNMMMMMdosmMMMMMMmsodMMMM `NMdoMMMMMMMMMMy`:hMMh:`yMMMMMM :MMoNMMMMMMMMMMM." },
+                { content: "oMMo .MMMMMMM /MM/dMMMMMMMMMMm` oMMo `mMMMMMM :MMo.hMMMMMMMMMh. oMMo .hMMMMMM `NMd  -ohddhssNMNsyMMysNMNsshddh +MM+ .sNMMMMMMNs`       yMM/          .sNMMNs." },
+                { content: "+NMm/`  oMMo  `/ .sNMmo  oMMo      -omMN `+hMNmho/-.+dd+.-/ohNMMh+` `./sdmNNNNNNNNNNmds/.`.-:////:-.`....  ............``Nm+`     mM+NNNmy:    -sdmNNNNs- ." },
+                { content: "NNN``:smNNd dddm`yNMNhsohNMNs. NMMhssssssdMMd -dMMmyssdMMmo` ///yyMMmyyy. `yNMNhsoyNMNy /MMMymMMNh +yNMNhsooMMd.    -mMMo NM  :hhs dMMs`   `/MMM- `:ymMMm  MMd." },
+                { content: "-mMM hMMMMNh+.  /MMN-`  yMMy      dMMo dMMNdo-`       NMM+      MMM: ///./ymMMmy: `yMM hMM hmMMMm+    +MMm`   -mMMh+:--`dMMo dNMmNMNdo-`    +NMNy/---`MMM/ MM+   +yNMMMm smMM  :--`hMM hmMMmMMNh+ -dMMdo:--.smNMMMNsdMMo ---.-odNMNdo-`  :hmMMMMN/MMM: dMMMMMMMMMMMM s.smNMMMMyhMM c893648589c1ea8ba4209ce4725a52492c77d05addHardware: ArSrv 14.5.1Process:  Access [981052]Testing Passphrase... VerifiedPassphrase Accepted44.228.163.154ENTER PASSPHRASE: *****Path:/private/var/containers/Bundle/Runtime/F6XOF5DE1-8M02-4331-A107-FAADMED55A1F/Ara.srv/usr.appIdentifier: ara.jpVersion:    6.7.3.42 (6.7.3)Code Type:  CRS-196  {Native}Testing Passphrase... VerifiedPassphrase Accepted01001110 01101001 01100011 01100101 00100000 4F85AD99-4240-BBC7-AEAFA51123FXCrashReport Key: ydmNNNmmmmNNNmdy/ .+dNNmyo/+shddhs+/oymN .sNMdo-` .yNMMMMMMNy." },
+                { content: "`- `+NMd/`    hMMMMMMMMMMh     yMNo`     `MMMMMMMMMMMM`     yMN/`.:/+/.`yMMMMMMMMMMy`./+ +MM+/dNMMMMMdosmMMMMMMmsodMMMM `NMdoMMMMMMMMMMy`:hMMh:`yMMMMMM :MMoNMMMMMMMMMMM." },
+                { content: "oMMo .MMMMMMM /MM/dMMMMMMMMMMm` oMMo `mMMMMMM :MMo.hMMMMMMMMMh. oMMo .hMMMMMM `NMd  -ohddhssNMNsyMMysNMNsshddh +MM+ .sNMMMMMMNs`       yMM/          .sNMMNs." },
+                { content: "+NMm/`  oMMo  `/ .sNMmo  oMMo      -omMN `+hMNmho/-.+dd+.-/ohNMMh+` `./sdmNNNNNNNNNNmds/.`.-:////:-.`....  ............``Nm+`     mM+NNNmy:    -sdmNNNNs- ." },
+                { content: "NNN``:smNNd dddm`yNMNhsohNMNs. NMMhssssssdMMd -dMMmyssdMMmo` ///yyMMmyyy. `yNMNhsoyNMNy /MMMymMMNh +yNMNhsooMMd.    -mMMo NM  :hhs dMMs`   `/MMM- `:ymMMm  MMd." },
+                { content: "-mMM hMMMMNh+.  /MMN-`  yMMy      dMMo dMMNdo-`       NMM+      MMM: ///./ymMMmy: `yMM hMM hmMMMm+    +MMm`   -mMMh+:--`dMMo dNMmNMNdo-`    +NMNy/---`MMM/ MM+   +yNMMMm smMM  :--`hMM hmMMmMMNh+ -dMM01101101ENTER PASSPHRASE: pass3Role: LibraryParent Process:   launchR [1]Exception Type:   EXC_CRASH [SRCKILL]Exception Codes:  0x00000000000000, 0x0000000000000Testing Passphrase... VerifiedPassphrase AcceptedDownload?" },
+                { content: "<y/n>y[ ---- Download the audio file ----- ]mp3.jpegENTER PASSPHRASE: ****pass4Exception Note:   EXC_CRS_NOTIFYTerminal Reason:  Namespace_EURODYNE, Code 0x8badff00dTesting Passphrase... VerifiedPassphrase AcceptedENTER PASSPHRASE: ****pass5Termination Description:  ACCESS, file-create watchdog violation: arasaka.srv exhausted access allow time 5.81 |" },
+                { content: "ProcessVisibility: Background | ProcessState: Running | Violation | video-view |" },
+                { content: "CPU elapsed Triggered by Thread: 0Filtered syslog:None foundExecute boot sequence...Testing Passphrase... VerifiedPassphrase Accepted Thread 0 crashed with ARM Thread State (64-bit) x0: 0x00000001b76acea0   x1: 0x000000018fbd3fbd   x2: 0x000000010cb17260   x3: 0x0000000000000001x4: 0x0000000000000000   x5: 0x0000000000000001   x6: 0x0000000000000020   x7: 0x0000000000000004x8: 0x0000000109a34380   x9: 0x0000000109a34310  x10: 0x0000000109a34311  x11: 0x0000000109a3431x12: 0x000000010c8e3cb0  x13: 0x0000000000000000  x14: 0x0000000000000000  x15: 0x000000018fbd49dx16: 0x00000001b76acea0  x17: 0x0000000000000000  x18: 0x0000000000000000  x19: 0x000000018fbd3fbx20: 0x0000000109a34318  x21: 0x0000000109a34388  x22: 0x00000001b766cfd0  x23: 0x000000000000000x24: 0x00000001b76acea0  x25: 0x0000000000000000  x26: 0x00000001b766e000  x27: 0x00000000ffed828x28: 0x0000000000000000 " },
+                { content: "  fp: 0x000000016f969e90   lr: 0x0000000184475aa8sp: 0x000000016f969e70   pc: 0x0000000184475da8 cpsr: 0x800000000x100490000 - 0x103cabfff Arasaka <6499420763bf3621abf3f6218adc6354> /var/containers/Bundle/Application/11F1F5DE-2F68-4331-A107-FAADCED42A1F/Ara.srv/Arasaka0x104ce8000 - 0x104e1ffff MMCommon arm64  <85b8839214673db29e3b6a4eeaaacba7> /var/containers/Bundle/Application/11F1F5DE-2F68-4331-A107-FAADCED42A1F/Ara.srv/Frameworks/MMCommon.framework/MMCommon0x104e68000 - 0x104ea3fff dyld arm64  <06dc98224ae03573bf72c78810c81a78> /usr/lib/dyld0x104F85AD99-4240-BBC7-AEAFA51123FXCrashReport Key: ydmNNNmmmmNNNmdy/ .+dNNmyo/+shddhs+/oymN .sNMdo-` .yNMMMMMMNy." },
+                { content: "`- `+NMd/`    hMMMMMMMMMMh     yMNo`     `MMMMMMMMMMMM`     yMN/`.:/+/.`yMMMMMMMMMMy`./+ +MM+/dNMMMMMdosmMMMMMMmsodMMMM `NMdoMMMMMMMMMMy`:hMMh:`yMMMMMM :MMoNMMMMMMMMMMM." },
+                { content: "oMMo .MMMMMMM /MM/dMMMMMMMMMMm` oMMo `mMMMMMM :MMo.hMMMMMMMMMh. oMMo .hMMMMMM `NMd  -ohddhssNMNsyMMysNMNsshddh +MM+ .sNMMMMMMNs`       yMM/          .sNMMNs." },
+                { content: "+NMm/`  oMMo  `/ .sNMmo  oMMo      -omMN `+hMNmho/-.+dd+.-/ohNMMh+` `./sdmNNNNNNNNNNmds/.`.-:////:-.`....  ............``Nm+`     mM+NNNmy:    -sdmNNNNs- ." },
+                { content: "NNN``:smNNd dddm`yNMNhsohNMNs. NMMhssssssdMMd -dMMmyssdMMmo` ///yyMMmyyy. `yNMNhsoyNMNy /MMMymMMNh +yNMNhsooMMd.    -mMMo NM  :hhs dMMs`   `/MMM- `:ymMMm  MMd." },
+                { content: "-mMM hMMMMNh+.  /MMN-`  yMMy      dMMo dMMNdo-`       NMM+      MMM: ///./ymMMmy: `yMM hMM hmMMMm+    +MMm`   -mMMh+:--`dMMo dNMmNMNdo-`    +NMNy/---`MMM/ MM+   +yNMMMm smMM  :--`hMM hmMMmMMNh+ -dMM4efc000 - 0x1051bbfff TXLiteAVSDK_Smart_No_VOD arm64  <94b2ab6b3c863923b321327155770286> /var/containers/Bundle/Application/11F1F5DE-2F68-4331-A107-FAADCED42A1F/Ara.srv/Frameworks/TXLiteAVSDK_Smart_No_VOD.framework/TXLiteAVSDK_Smart_No_VOD0x1055e4000 - 0x10572ffff WCDB arm64  <c1b1509046923a93b29755fe25526e00> /var/containers/Bundle/Application/11F1F5DE-2F68-4331-A107-FAADCED42A1F/Ara.srv/Frameworks/ARA.framework/ARA0x10587c000 - 0x105c7bfff MultiMedia arm64  <b456f7d1d8ba3eadb83d84d9e9eed783> /var/containers/Bundle/Application/11F1F5DE-2F68-4331-A107-FAADCED42A1F/Ara.srv/Frameworks/Access.framework/MultiMedia0x105f8c000 - 0x106147fff Usr.Track arm64  <682efa309eed33ce894bd1383988e38a> /var/containers/Bundle/Application/11F1F5DE-2F68-4331-A107-FAADCED42A1F/Ara.srv/Frameworks/UserTrack.framework/TrackingException Type: EXC_BAD_ACCESS (SIGSEGV)...0   libobjc.A.dylib 0x00007fff6011713c objc_release + 281   ArasakaSrv 0x00000001000022ea @objc LoginViewController.__ivar_destroyer + 42Status={0x80, 0x20, 00, 0x10, 00, " },
+                { content: "00, 00, 0x11, 0x1, 0x1, 00, 0x4, 0xf0, 0x2, 0x9, 00}00 ArasakaAXSsrv [0] <Debug>: Sent message of 20 bytes01 ArasakaAXSsrv [0] <Debug>: exit, err=0x002 ArasakaAXSsrv [0] <Debug>: mask=0xFF, bad=false03 ArasakaAXSsrv [0] <Debug>: exit04 ArasakaAXSsrv [0] <Debug>: entry05 ArasakaAXSsrv [0] <Debug>: exit06 ArasakaAXSsrv [0] <Debug>: entry07 ArasakaAXSsrv [0] <Debug>: entry08 ArasakaAXSsrv [0] <Debug>: txBufferLength=7 rxBufferLength=2309 ArasakaAXSsrv [0] <Debug>: WrotB |" },
+                { content: "0x80 0x10 0x00 0x07 0x00 0x00 0x00010 ArasakaAXSsrv [0] <Debug>:  Rea23B |" },
+                { content: "0x00 0x00 0x00 0x00 0x00 0x00 0x00 0x80 0x20 0x00 0x10 0x00 0x00 0x00 0x11(lldb) disassemble -a 0x00000001000022eaSrvInsight`@objc LoginViewController.__ivar_destroyer:0x1000022c0 <+0>: pushq %rbp0x1000022c1 <+1>: movq %rsp, %rbp0x1000022c4 <+4>: pushq %rbp0x1000022c4 <+4>: pushq %rbx0x1000022c5 <+5>: pushq %rax0x1000022c6 <+6>: movq %rdi, %rbx 0x1000022c9 <+9>: movq 0x551e40(%rip), %rax      ;" },
+                { content: "direct field offset for LoginViewController.userName0x1000022d0 <+16>: movq 0x10(%rbx,%rax), %rdi0x1000022d5 <+21>: callq 0x1004adc90    ;ffset for LoginViewController.database0x1000022e1 <+33>: movq (%rbx,%rax), %rdi0x1000022e5 <+37>: callq 0x1004bf9e6 ;" },
+                { content: "symbol stub for: objc_release0x1000022ea <+42>: movq 0x551e2f(%rip), %rax direct field offset for LoginViewController.views0x1000022f1 <+49>: movq (%rbx,%rax), %rdi0x1000022f5 <+53>: addq $0x8, %rsp0x1000022f9 <+57>: popq %rbx0x1000022fa <+58>: popq %rbp0x1000022fb <+59>: jmp 0x1004ad;" },
+                { content: "4F85AD99-4240-BBC7-AEAFA51123FXCrashReport Key: ydmNNNmmmmNNNmdy/ .+dNNmyo/+shddhs+/oymN .sNMdo-` .yNMMMMMMNy. `- `+NMd/`    hMMMMMMMMMMh     yMNo`     `MMMMMMMMMMMM`     yMN/`.:/+/.`yMMMMMMMMMMy`./+ +MM+/dNMMMMMdosmMMMMMMmsodMMMM `NMdoMMMMMMMMMMy`:" },
+            ];
+        }
+
+        function scrollToBottom() {
+            const terminal = document.getElementById('terminal');
+            terminal.scrollTop = terminal.scrollHeight;
+        }
+
+        async function typeWriter(text, className = '', delay = 20) {
+            return new Promise(resolve => {
+                isTyping = true;
+                const div = document.createElement('div');
+                div.className = `output ${className}`;
+                output.appendChild(div);
+                
+                let i = 0;
+                const interval = setInterval(() => {
+                    if (i < text.length) {
+                        div.textContent += text[i];
+                        i++;
+                        scrollToBottom();
+                    } else {
+                        clearInterval(interval);
+                        isTyping = false;
+                        resolve();
+                    }
+                }, delay);
+            });
+        }
+
+        async function typeWriterInstant(text, className = '') {
+            const div = document.createElement('div');
+            div.className = `output ${className}`;
+            div.textContent = text;
+            output.appendChild(div);
+            scrollToBottom();
+        }
+
+        async function insertBlankLine() {
+            await typeWriterInstant('');
+        }
+
+        async function typeWriterWithStatus(baseText, statusText, className = '') {
+            return new Promise(async resolve => {
+                isTyping = true;
+                const div = document.createElement('div');
+                div.className = `output ${className}`;
+                output.appendChild(div);
+                
+                for (let i = 0; i < baseText.length; i++) {
+                    div.textContent += baseText[i];
+                    scrollToBottom();
+                    await new Promise(r => setTimeout(r, 20)); 
+                }
+                
+                for (let i = 0; i < 3; i++) {
+                    await new Promise(r => setTimeout(r, 500)); 
+                    div.textContent += '.';
+                    scrollToBottom();
+                }
+
+                await new Promise(r => setTimeout(r, 500));
+                div.textContent += ' ' + statusText;
+                scrollToBottom();
+                await new Promise(r => setTimeout(r, 500));
+                isTyping = false;
+                resolve();
+            });
+        }
+
+        async function printAsciiArt(lines) {
+            isTyping = true;
+            const delayPerLine = 5000 / lines.length; 
+            for (const line of lines) {
+                const div = document.createElement('div');
+                div.className = 'output ascii-art';
+                div.textContent = line;
+                output.appendChild(div);
+                scrollToBottom();
+                await new Promise(r => setTimeout(r, delayPerLine));
+            }
+            isTyping = false;
+        }
+
+        async function login() {
+            const username = document.getElementById('username').value;
+            const password = document.getElementById('password').value;
+            if (username === credentials.username && (password === credentials.passwordPrefix || password.startsWith(credentials.passwordPrefix))) {
+                bootSequenceStart();
+            } else {
+                await loginFailedSequence();
+            }
+        }
+
+        async function loginFailedSequence() {
+            document.getElementById('login-screen').style.display = 'none';
+            document.getElementById('console-screen').style.display = 'block';
+            await typeWriter('Authenticating credentials...', '', 20);
+            await new Promise(r => setTimeout(r, 1000));
+            await typeWriter('ACCESS DENIED', 'error');
+            await typeWriter('Unauthorized access attempt logged.', 'error');
+            await typeWriter('Terminating session...');
+            await new Promise(r => setTimeout(r, 2000));
+            output.innerHTML = '';
+            document.getElementById('console-screen').style.display = 'none';
+            document.getElementById('login-screen').style.display = 'flex';
+            document.getElementById('password').value = '';
+            document.getElementById('username').focus();
+        }
+
+        async function bootSequenceStart() {
+            gameState = 'BOOTING';
+            document.getElementById('login-screen').style.display = 'none';
+            document.getElementById('console-screen').style.display = 'block';
+            
+            await typeWriterWithStatus('Authenticating credentials', 'Confirmed');
+            await typeWriterWithStatus('Arak_Server 320gsL connection', 'Established');
+            await typeWriterWithStatus('Accessing File \'/srd/slab/ara/:dt_000000319/falc_mim\'', 'Done');
+            await typeWriterWithStatus('Reading Package list', 'Done');
+            await typeWriterWithStatus('Protocol 21z5532 Bd0r', 'Activated');
+            await typeWriterWithStatus('Program GSNN531', 'Activated');
+            
+            await insertBlankLine();
+            await printAsciiArt(asciiLogoLines);
+            await insertBlankLine();
+            
+            await typeWriterInstant('++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++');
+            await typeWriter('Welcome, Choombas. You have gained access to subprotocol functions.');
+            await typeWriter('A mimetic self-replicating glitch system with a crash-priority-override');
+            await typeWriter('cybernetic virus has been launched to hide your unregistered access.');
+            await typeWriter('You have 02:16:55:18 left until the server will reset.');
+            await typeWriter('You must crash the server before time is exceeded.');
+            await typeWriter('Passphrase clues are limited and hidden.');
+            await typeWriterInstant('========================================================================================');
+            await typeWriter('d o N O T   t h i n k   y o u   c a n   d o   t h i s   a l o n e');
+            await typeWriterInstant('========================================================================================');
+            await typeWriter('d o N O T   c l o s e   t h i s   s e r v e r');
+            await typeWriterInstant('========================================================================================');
+            await typeWriter('D O   N O T   F A I L');
+            await typeWriterInstant('========================================================================================');
+            await typeWriter('T h e   C l o c k   i s   T i c k i n g');
+            await typeWriterInstant('========================================================================================');
+            await typeWriterInstant('');
+            
+            askConfirmation();
+        }
+
+        async function askConfirmation() {
+            gameState = 'CONFIRMATION';
+            await typeWriter('Do you understand? <y/n>');
+            const form = document.getElementById('passphrase-form');
+            inputPrompt.textContent = 'RESPONSE >';
+            form.classList.remove('hidden');
+            passphraseInput.value = '';
+            passphraseInput.focus();
+        }
+
+        async function bootSequenceEnd() {
+            gameState = 'BOOTING';
+            document.getElementById('passphrase-form').classList.add('hidden');
+            
+            await typeWriterInstant('');
+            await typeWriter('Initiating crash protocol...');
+            await typeWriterInstant('');
+            await typeWriterInstant('-----BEGIN ENCRYPTION---');
+            await typeWriter('UGx1ZyBpbiBhbmQgdGFrZSBvdmVy');
+            await typeWriterInstant('-----END ENCRYPTION-----');
+            await typeWriterInstant('');
+            
+            gameState = 'GAME';
+            showNextChallenge();
+        }
+
+        async function handleConfirmation(input) {
+            const val = input.toLowerCase();
+            const div = document.createElement('div');
+            div.className = 'output';
+            div.textContent = `RESPONSE > ${input}`;
+            output.appendChild(div);
+            scrollToBottom();
+
+            if (val === 'y') {
+                bootSequenceEnd();
+            } else if (val === 'n') {
+                await typeWriterInstant('');
+                await typeWriter('Re-evaluating user competence...');
+                await new Promise(r => setTimeout(r, 1000));
+                await typeWriterInstant('');
+                askConfirmation();
+            } else {
+                askConfirmation();
+            }
+        }
+
+        async function showNextChallenge() {
+            currentStage++;
+            if (currentStage === 1) {
+                inputPrompt.textContent = 'ENTER PASSPHRASE:';
+            } else if (currentStage === 2) {
+                await typeWriter('Incident Identifier: 4F85AD99-4240-BBC7-AEAFA51123FX');
+                await typeWriter('CrashReport Key: c893648589c1ea8ba4209ce4725a52492c77d05add');
+                await typeWriter('Hardware: ArSrv 14.5.1');
+                await typeWriter('Process: Access [981052]');
+                await typeWriterInstant('');
+                await typeWriter('INVESTIGATE: [44.228.163.154]');
+                await typeWriterInstant('');
+                inputPrompt.textContent = 'ENTER PASSPHRASE:';
+            } else if (currentStage === 3) {
+                await typeWriter('Path:/private/var/containers/Bundle/Runtime/F6XOF5DE1-8M02-4331-A107-FAADMED55A1F/Ara.srv/usr.app');
+                await typeWriter('Identifier: ara.jp');
+                await typeWriter('Version: 6.7.3.42 (6.7.3)');
+                await typeWriter('Code Type: CRS-196 {Native}');
+                await typeWriterInstant('');
+                await typeWriter('Question 1: The fight Vick is watching');
+                inputPrompt.textContent = 'Passphrase 1:';
+            } else if (currentStage === 4) {
+                await typeWriter('Role: Library');
+                await typeWriter('Parent Process: launchR [1]');
+                await typeWriter('Exception Type: EXC_CRASH [SRCKILL]');
+                await typeWriter('Exception Codes: 0x00000000000000, 0x0000000000000');
+                await typeWriterInstant('');
+                await typeWriter('Question 2: Parker founded Dallas-FT. Worth Metro Area HQ');
+                inputPrompt.textContent = 'Passphrase 2:';
+            } else if (currentStage === 5) {
+                await typeWriter('Exception Note: EXC_CRS_NOTIFY');
+                await typeWriter('Terminal Reason: Namespace_EURODYNE, Code 0x8badff00d');
+                await typeWriterInstant('');
+                const binaryLines = [
+                    "00110000 00110001 00110001 00110000 00110001 00100000 00110000 00110001 00110000 00110001",
+                    "00110000 00100000 00110000 00110001 00110000 00110001 00110000 00100000 00110001 00110001",
+                    "00110001 00110001 00110000 00100000 00110000 00110001 00110001 00110000 00100000 00110000",
+                    "00110001 00110000 00110001 00110000 00100000 00110000 00110001 00110000 00110001 00110000",
+                    "00100000 00110001 00110000 00110001 00110000 00110000 00100000 00110001 00110000 00110000",
+                    "00110001 00110001 00100000 00110001 00110000 00110000 00110001 00110001 00100000 00110000",
+                    "00110001 00110000 00110000 00110001 00100000 00110001 00110000 00110001 00110001 00110001",
+                    "00100000 00110000 00110001 00110000 00110001 00110001 00100000 00110001 00110000 00110001",
+                    "00110000 00110000 00100000 00110000 00110000 00110000 00110000 00110001 00100000 00110000",
+                    "00110001 00110000 00110001 00110000 00100000 00110000 00110000 00110001 00110000 00110001",
+                    "00100000 00110000 00110001 00110001 00110000 00110000 00100000 00110001 00110000 00110000",
+                    "00110000 00110000 00100000 00110000 00110000 00110001 00110001 00110001 00100000 00110000",
+                    "00110000 00110001 00110001 00110001 00100000 00110001 00110000 00110000 00110000 00110000",
+                    "00100000 00110000 00110000 00110001 00110001 00110000 00100000 00110001 00110000 00110001",
+                    "00110001 00110001 00100000 00110000 00110001 00110001 00110000 00110001 00100000 00110000",
+                    "00110001 00110001 00110000 00110001 00100000 00110000 00110000 00110000 00110000 00110001",
+                    "00100000 00110000 00110001 00110000 00110001 00110000 00100000 00110000 00110000 00110001",
+                    "00110000 00110001 00100000 00110000 00110001 00110000 00110000 00110000 00100000 00110000",
+                    "00110000 00110001 00110001 00110000 00100000 00110001 00110000 00110000 00110000 00110000",
+                    "00100000 00110000 00110001 00110001 00110000 00110000 00100000 00110001 00110000 00110000",
+                    "00110001 00110001 00100000 00110001 00110000 00110000 00110000 00110000 00100000 00110000",
+                    "00110000 00110001 00110001 00110001 00100000 00110000 00110000 00110001 00110001 00110000",
+                    "00100000 00110001 00110000 00110000 00110000 00110000 00100000 00110001 00110000 00110001",
+                    "00110000 00110001 00100000 00110000 00110001 00110001 00110001 00110000 00100000 00110001",
+                    "00110000 00110000 00110000 00110000 00100000 00110000 00110001 00110000 00110001 00110001",
+                    "00100000 00110001 00110000 00110000 00110001 00110000"
+                ];
+                // バイナリ全体で約1秒なので、1行あたり約38ms
+                const binaryDelay = 1000 / binaryLines.length;
+                for (const line of binaryLines) {
+                    await typeWriterInstant(line);
+                    await new Promise(r => setTimeout(r, binaryDelay));
+                }
+                
+                await typeWriterInstant('');
+                await typeWriter('INVESTIGATE: [44.230.56.213]');
+                await typeWriterInstant('');
+                inputPrompt.textContent = 'ENTER PASSPHRASE:';
+            } else if (currentStage === 6) {
+                await typeWriter('Termination Description: ACCESS, file-create watchdog violation: arasaka.srv exhausted access allow time 5.81 | ProcessVisibility: Background | ProcessState: Running | Violation | video-view | CPU elapsed');
+                await typeWriter('Triggered by Thread: 0');
+                await typeWriter('Filtered syslog:');
+                await typeWriter('None found');
+                await typeWriterInstant('');
+                await typeWriter('http://sh.term.zz434r.arasaka.co/media/n/corrupted/Arak_NC20_CP77_v23.mp3');
+                await typeWriterInstant('');
+                inputPrompt.textContent = 'ENTER PASSPHRASE:';
+            } else if (currentStage === 7) {
+                await typeWriter('Termination Description: ACCESS, file-create watchdog violation: arasaka.srv exhausted access allow time 5.81 | ProcessVisibility: Background | ProcessState: Running | Violation | video-view | CPU elapsed');
+                await typeWriter('Triggered by Thread: 0');
+                await typeWriter('Filtered syslog:');
+                await typeWriter('None found');
+                await typeWriterInstant('');
+                await typeWriter('0x490x450x6c0x7a0x620x530x420x360x5a0x320x780x6a0x490x470x350x360x590x790x420x6c0x630x320x520x6a0x4c0x690x420x450x590x320x390x750x630x480x4e0x700x490x470x350x360x590x790x420x760x610x570x390x750x590x330x550x750x490x460x520x460x4e0x540x630x770x4e0x440x510x790x490x410x3d0x3d');
+                await typeWriterInstant('');
+                inputPrompt.textContent = 'ENTER PASSPHRASE:';
+            } else if (currentStage === 8) {
+                await crashSequence();
+                return;
+            }
+            
+            document.getElementById('passphrase-form').classList.remove('hidden');
+            passphraseInput.value = '';
+            setTimeout(() => passphraseInput.focus(), 100);
+        }
+
+        async function checkPassphrase() {
+            const input = passphraseInput.value.trim();
+            const expected = passphrases[currentStage - 1];
+            
+            document.getElementById('passphrase-form').classList.add('hidden');
+            
+            await insertBlankLine();
+            await typeWriter(`${inputPrompt.textContent} `);
+            await insertBlankLine();
+            await typeWriter(input);
+            await insertBlankLine();
+            await insertBlankLine();
+            
+            // Testing Passphrase... Done
+            await typeWriterWithStatus('Testing Passphrase', 'Done');
+            
+            if (input === expected) {
+                await typeWriter('Passphrase Accepted');
+                await insertBlankLine();
+                setTimeout(() => showNextChallenge(), 1000);
+            } else {
+                await typeWriter('denied', 'error');
+                await typeWriter('Access Denied', 'error');
+                await typeWriter('');
+                document.getElementById('passphrase-form').classList.remove('hidden');
+                passphraseInput.value = '';
+                passphraseInput.focus();
+            }
+        }
+
+        async function crashSequence() {
+            await insertBlankLine();
+            
+            // Testing Passphrase をタイプライター表示
+            await typeWriter('Testing Passphrase');
+            // "..." を1文字ずつ表示
+            await typeWriter('...');
+            // Done を表示
+            await typeWriter(' Done');
+            await insertBlankLine();
+            
+            // Passphrase Accepted をタイプライター表示
+            await typeWriter('Passphrase Accepted');
+            await insertBlankLine();
+            
+            // Termination Description から Execute boot sequence まではタイプライター表示
+            await typeWriter('Termination Description:  ACCESS, file-create watchdog violation: arasaka.srv exhausted access allow time 5.81 | ProcessVisibility: Background | ProcessState: Running | Violation | video-view | CPU elapsed');
+            await insertBlankLine();
+            await typeWriter('Triggered by Thread: 0');
+            await insertBlankLine();
+            await typeWriter('Filtered syslog:');
+            await insertBlankLine();
+            await typeWriter('None found');
+            await insertBlankLine();
+            await typeWriter('Execute boot sequence...');
+            await insertBlankLine();
+            await insertBlankLine();
+            await insertBlankLine();
+            
+            // Execute boot sequence 以降は1行ずつ表示
+            const sequence = getCrashSequence();
+            for (const item of sequence) {
+                const div = document.createElement('div');
+                div.className = 'output';
+                div.textContent = item.content;
+                output.appendChild(div);
+                scrollToBottom();
+                await new Promise(r => setTimeout(r, 20));
+            }
+            
+            // 3秒待機
+            await new Promise(r => setTimeout(r, 3000));
+            
+            // 画面をクリア
+            output.innerHTML = '';
+            
+            // "Until next time, Choombas..." をタイプライター表示
+            await typeWriter('Until next time, Choombas...');
+            
+            isTyping = false;
+        }
+
+        document.getElementById('username').addEventListener('keydown', function(e) {
+            if (e.key === 'Enter') {
+                e.preventDefault();
+                document.getElementById('password').focus();
+            }
+        });
+
+        document.getElementById('password').addEventListener('keydown', function(e) {
+            if (e.key === 'Enter') {
+                e.preventDefault();
+                login();
+            }
+        });
+
+        passphraseInput.addEventListener('keydown', function(e) {
+            if (isTyping) return;
+            
+            if (e.key === 'Enter') {
+                e.preventDefault();
+                const val = passphraseInput.value.trim();
+                
+                if (gameState === 'CONFIRMATION') {
+                    document.getElementById('passphrase-form').classList.add('hidden');
+                    handleConfirmation(val);
+                } else if (gameState === 'GAME') {
+                    checkPassphrase();
+                }
+            }
+        });
+
+        window.onload = () => {
+            document.getElementById('username').focus();
+        };
+    </script>
+</body>
+</html>
